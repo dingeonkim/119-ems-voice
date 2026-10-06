@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b57d0">
+<link rel="manifest" href="manifest.json">
+<title>119 환자정보 음성정리</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#17202a;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+header{background:#0b57d0;color:#fff;padding:15px 16px;position:sticky;top:0;z-index:5}header h1{margin:0;font-size:20px}header p{margin:4px 0 0;font-size:12px}
+main{max-width:900px;margin:auto;padding:12px}.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 5px #0001}
+h2{font-size:16px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}@media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}}
+label{font-size:12px;color:#667085;display:block;margin-bottom:4px}input,textarea{width:100%;border:1px solid #d9dee5;border-radius:9px;padding:10px;font-size:15px;background:#fff}textarea{min-height:100px}
+button{border:0;border-radius:10px;padding:11px 14px;font-size:15px;font-weight:700}button:disabled{opacity:.45}.primary{background:#0b57d0;color:#fff}.secondary{background:#e8eef9;color:#174ea6}.danger{background:#fde8e8;color:#b42318}.dark{background:#263238;color:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap}.status{padding:10px;border-radius:9px;background:#f0f4f8;font-size:13px;margin-top:9px}.recording{background:#fff0f0;color:#b71c1c;font-weight:700}.ok{background:#eaf8f2;color:#087f5b}
+.small{font-size:12px;color:#667085;line-height:1.5}.output{white-space:pre-wrap;background:#f8f9fa;border:1px solid #d9dee5;border-radius:9px;padding:12px;line-height:1.7;font-size:15px}
+</style>
+</head>
+<body>
+<header><h1>🚑 119 환자정보 음성정리</h1><p>현장 음성 → 정보 자동 분류 → 병원 사전연락 문장</p></header>
+<main>
+<section class="card">
+<h2>🎙️ 음성 입력</h2>
+<div class="row"><button id="start" class="primary">🎙️ 음성입력 시작</button><button id="stop" class="danger" disabled>■ 입력 종료</button><button id="clear" class="secondary">초기화</button></div>
+<div id="status" class="status">준비 중...</div>
+<p class="small"><b>중요:</b> 반드시 <b>HTTPS 웹주소</b>에서 사용하세요. 파일을 직접 여는 file:// 방식은 Chrome에서 마이크가 차단될 수 있습니다.</p>
+</section>
+
+<section class="card"><h2>📝 음성 내용</h2><textarea id="raw" placeholder="예: 환자 70대 여성으로 1940년 5월 20일 김OO, 벌에 쏘여 어지러움 호소..."></textarea><div style="margin-top:8px"><button id="parse" class="primary">내용 자동 정리</button></div></section>
+
+<section class="card"><h2>👤 환자 기본정보</h2><div class="grid">
+<div><label>나이</label><input id="age"></div><div><label>성별</label><input id="sex"></div><div><label>생년월일</label><input id="dob"></div><div><label>이름</label><input id="name"></div>
+</div></section>
+
+<section class="card"><h2>🩺 주요 정보</h2>
+<label>주증상</label><input id="symptom">
+<div class="grid" style="margin-top:9px">
+<div><label>혈압 BP</label><input id="bp"></div><div><label>맥박 P</label><input id="pulse"></div><div><label>호흡 RR</label><input id="rr"></div><div><label>SpO₂</label><input id="spo2"></div>
+<div><label>BST</label><input id="bst"></div><div><label>의식</label><input id="mental"></div><div><label>체온</label><input id="temp"></div><div><label>통증</label><input id="pain"></div>
+</div>
+<label style="margin-top:10px">발생기전 / 경과</label><textarea id="mechanism"></textarea>
+<label style="margin-top:10px">과거력</label><textarea id="history"></textarea>
+<label style="margin-top:10px">복용약</label><textarea id="meds"></textarea>
+<label style="margin-top:10px">알레르기</label><textarea id="allergy"></textarea>
+<label style="margin-top:10px">처치 / 반응</label><textarea id="treatment"></textarea>
+</section>
+
+<section class="card"><h2>📞 병원 사전연락 문장</h2><div id="out" class="output">아직 생성된 문장이 없습니다.</div>
+<div class="row" style="margin-top:8px"><button id="copy" class="dark">문장 복사</button><button id="speak" class="secondary">🔊 읽어주기</button></div></section>
+<section class="card"><h2>⚠️ 주의</h2><p class="small">기록·정리 보조용이며 진단이나 의학적 판단을 자동으로 내리지 않습니다. 입력하지 않은 사실을 임의로 생성하지 않습니다. 실제 환자정보 사용 시 소속 기관의 개인정보·환자정보 처리규정을 준수하세요.</p></section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let rec=null,finalText="",listening=false;
+function status(t,c=""){$("status").textContent=t;$("status").className="status "+c}
+function supported(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
+function createRec(){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return null;
+ const r=new SR();r.lang="ko-KR";r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+ r.onstart=()=>{listening=true;$("start").disabled=true;$("stop").disabled=false;status("🔴 음성 입력 중입니다. 자연스럽게 말씀하세요.","recording")};
+ r.onresult=e=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){let t=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=t+" ";else interim+=t}$("raw").value=(finalText+interim).trim()};
+ r.onerror=e=>{listening=false;$("start").disabled=false;$("stop").disabled=true;const m={"not-allowed":"마이크 권한이 차단되었습니다. Chrome 사이트 설정에서 이 사이트의 마이크를 허용하세요.","service-not-allowed":"브라우저에서 음성인식 서비스가 허용되지 않았습니다.","audio-capture":"마이크를 찾을 수 없습니다.","no-speech":"음성이 감지되지 않았습니다.","network":"음성인식 서비스 연결에 문제가 있습니다."};status("❌ "+(m[e.error]||("음성인식 오류: "+e.error)))};
+ r.onend=()=>{listening=false;$("start").disabled=false;$("stop").disabled=true;if(!$("status").textContent.startsWith("❌"))status("음성 입력이 종료되었습니다.","ok")};
+ return r;
+}
+$("start").onclick=()=>{
+ if(!location.protocol.startsWith("http")){status("❌ 현재 파일로 직접 열었습니다. HTTPS 웹주소에서 사용해야 합니다.");return}
+ if(!supported()){status("❌ 이 브라우저는 음성인식을 지원하지 않습니다. Galaxy Tab Chrome 최신 버전을 사용하세요.");return}
+ if(!rec)rec=createRec();finalText=$("raw").value.trim();
+ try{rec.start()}catch(e){try{rec.stop()}catch(_){}setTimeout(()=>{rec=createRec();try{rec.start()}catch(_){status("❌ 음성인식을 시작할 수 없습니다. Chrome을 다시 실행해 주세요.")}},300)}
+};
+$("stop").onclick=()=>{try{rec&&rec.stop()}catch(_){}};
+
+function find(re,t){let m=t.match(re);return m?m[1].trim():""}
+function parse(){
+ const t=$("raw").value.replace(/\s+/g," ").trim();if(!t){status("먼저 음성 또는 텍스트를 입력하세요.");return}
+ const set=(id,v)=>{if(v)$(id).value=v};
+ set("age",find(/(\d{1,3}\s*대(?:\s*(?:남성|여성|남자|여자))?)/,t));set("sex",find(/(남성|여성|남자|여자)/,t));
+ set("dob",find(/(\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일)/,t));set("name",find(/(?:이름|성명)\s*[:은는]?\s*([가-힣A-Za-z0-9○*]{2,20})/,t));
+ set("bp",find(/(?:BP|혈압)\s*[:은는]?\s*(\d{2,3}\s*[\/|]\s*\d{2,3})/i,t));set("pulse",find(/(?:P|맥박|pulse)\s*[:은는]?\s*(\d{1,3})/i,t));
+ set("rr",find(/(?:RR|호흡수)\s*[:은는]?\s*(\d{1,2})/i,t));set("spo2",find(/(?:SpO2|SpO₂|산소포화도)\s*[:은는]?\s*(\d{2,3})\s*%?/i,t));set("bst",find(/(?:BST|혈당)\s*[:은는]?\s*(\d{2,3})/i,t));
+ set("temp",find(/(?:BT|체온)\s*[:은는]?\s*(\d{2}(?:\.\d)?)/i,t));
+ let s="";let k=["어지러움","흉통","호흡곤란","복통","두통","오심","구토","힘이 없","의식저하","경련","발열","통증"];let f=k.filter(x=>t.includes(x));if(f.length)s=f.join(", ");set("symptom",s);
+ set("history",find(/(?:과거력|기저질환)\s*[:은는]?\s*(.+?)(?=(?:복용약|약물|알레르기|처치|$))/,t));
+ set("meds",find(/(?:복용약|복용중인 약)\s*[:은는]?\s*(.+?)(?=(?:알레르기|과거력|처치|$))/,t));
+ set("allergy",find(/(?:알레르기|약물알레르기)\s*[:은는]?\s*(.+?)(?=(?:과거력|복용약|처치|$))/,t));
+ let mech= t.match(/(?:발생기전|발생경위|경위)\s*[:은는]?\s*(.+?)(?=(?:과거력|기저질환|복용약|알레르기|$))/);if(mech)set("mechanism",mech[1]);
+ else {let keys=["쏘였다","넘어졌다","교통사고","추락","운동 중","산에 오르다","식사 후"];let a=[];keys.forEach(x=>{let i=t.indexOf(x);if(i>=0)a.push(t.slice(Math.max(0,i-25),Math.min(t.length,i+65)))});if(a.length)set("mechanism",[...new Set(a)].join(" / "))}
+ set("treatment",find(/(?:처치|시행한 처치)\s*[:은는]?\s*(.+)$/ ,t));build();status("내용을 자동 분류했습니다. 각 항목을 확인하세요.","ok")
+}
+function build(){
+ let basic=["age","sex","dob","name"].map(x=>$(x).value).filter(Boolean).join(" ");let a=[];if(basic)a.push("환자 "+basic+"입니다.");
+ if($("symptom").value)a.push("주증상은 "+$("symptom").value+"입니다.");
+ let v=[];[["BP","bp"],["P","pulse"],["RR","rr"],["SpO₂","spo2"],["BST","bst"],["BT","temp"]].forEach(x=>{if($(x[1]).value)v.push(x[0]+" "+$(x[1]).value)});if(v.length)a.push("활력징후는 "+v.join(", ")+"입니다.");
+ [["발생 경위","mechanism"],["과거력","history"],["복용약","meds"],["알레르기","allergy"],["현장 처치","treatment"]].forEach(x=>{if($(x[1]).value)a.push(x[0]+"은 "+$(x[1]).value+"입니다.")});$("out").textContent=a.join(" ")||"입력된 정보가 없습니다."
+}
+$("parse").onclick=parse;$("copy").onclick=async()=>{try{await navigator.clipboard.writeText($("out").textContent);status("문장을 복사했습니다.","ok")}catch(e){status("복사에 실패했습니다.")}};
+$("speak").onclick=()=>{if("speechSynthesis"in window){speechSynthesis.cancel();let u=new SpeechSynthesisUtterance($("out").textContent);u.lang="ko-KR";u.rate=.95;speechSynthesis.speak(u)}};
+$("clear").onclick=()=>{finalText="";$("raw").value="";document.querySelectorAll("input,textarea").forEach(e=>{if(e.id!=="raw")e.value=""});$("out").textContent="아직 생성된 문장이 없습니다.";status("초기화했습니다.","ok")};
+if(location.protocol.startsWith("http")){status(supported()?"마이크 사용 준비 완료. '음성입력 시작'을 누르세요.":"이 브라우저는 음성인식을 지원하지 않습니다.","ok")}else status("⚠️ 파일로 직접 열었습니다. HTTPS 주소에서 사용하세요.");
+if("serviceWorker"in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("./sw.js").catch(()=>{});
+</script>
+</body></html>
